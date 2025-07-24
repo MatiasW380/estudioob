@@ -96,9 +96,9 @@
                 if (!text) return [];
                 const lines = text.trim().split(/\r?\n/);
                 if (lines.length < 2) return [];
-
+                
                 const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-
+                
                 return lines.slice(1).map(line => {
                     const obj = {};
                     let values = [];
@@ -106,7 +106,7 @@
                     let inQuotes = false;
 
                     for (let char of line) {
-                        if (char === '"' && line.indexOf(char) > 0) { // Maneja comillas
+                        if (char === '"' && line.indexOf(char) > 0) {
                             inQuotes = !inQuotes;
                         } else if (char === ',' && !inQuotes) {
                             values.push(current);
@@ -130,7 +130,7 @@
                 try {
                     const cacheBuster = `&v=${new Date().getTime()}`;
                     const urls = [CLIENTES_URL, CAUSAS_URL, NOVEDADES_URL].map(url => `${url}${cacheBuster}`);
-
+                    
                     const [clientesRes, causasRes, novedadesRes] = await Promise.all(urls.map(url => fetch(url)));
 
                     if (!clientesRes.ok || !causasRes.ok || !novedadesRes.ok) {
@@ -138,7 +138,7 @@
                     }
 
                     const [clientesText, causasText, novedadesText] = await Promise.all([clientesRes.text(), causasRes.text(), novedadesRes.text()]);
-
+                    
                     return {
                         clientes: parseCSV(clientesText),
                         causas: parseCSV(causasText),
@@ -162,7 +162,7 @@
                 loginError.classList.add('hidden');
                 const data = await fetchData();
                 if (!data) return;
-
+                
                 const cliente = data.clientes.find(c => c.DNI === dni && c.contraseña === password);
                 if (cliente) {
                     sessionStorage.setItem('cliente', JSON.stringify(cliente));
@@ -209,11 +209,22 @@
                 document.getElementById('causa-estado').textContent = causa.estado;
                 const timeline = document.getElementById('novedades-timeline');
                 timeline.innerHTML = '';
-                const novedadesDeCausa = todasLasNovedades.filter(n => n.ID_causa === causa.ID);
+
+                const novedadesDeCausa = todasLasNovedades
+                    .filter(n => n.ID_causa === causa.ID)
+                    // Ordena las novedades de la más reciente a la más antigua
+                    .sort((a, b) => {
+                        // Parsea la fecha dd/mm/aaaa a un objeto Date para comparar
+                        const dateA = new Date(a.fecha.split('/')[2], a.fecha.split('/')[1] - 1, a.fecha.split('/')[0]);
+                        const dateB = new Date(b.fecha.split('/')[2], b.fecha.split('/')[1] - 1, b.fecha.split('/')[0]);
+                        return dateB - dateA; // Ordena de forma descendente
+                    });
+
                 if (novedadesDeCausa.length === 0) {
                     timeline.innerHTML = '<li><p>No hay novedades registradas para esta causa.</p></li>';
                     return;
                 }
+
                 novedadesDeCausa.forEach(novedad => {
                     const item = document.createElement('li');
                     item.className = 'timeline-item';
@@ -226,7 +237,7 @@
                     timeline.appendChild(item);
                 });
             }
-
+            
             const tabLinks = document.querySelectorAll('.tab-link');
             const tabContents = document.querySelectorAll('.tab-content');
             function showTab(targetId) {
