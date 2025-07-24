@@ -1,0 +1,319 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Consulta de Causas</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        /* Estilos generales y para el diseño responsive */
+        body { padding: 1rem; }
+        .container { max-width: 800px; margin: auto; }
+        .hidden { display: none; }
+        .logout-btn { float: right; }
+        
+        /* Estilo para las tarjetas de causas */
+        .causa-card { cursor: pointer; margin-bottom: 1rem; transition: background-color 0.2s ease-in-out; }
+        .causa-card:hover { background-color: hsl(205, 15%, 95%); }
+
+        /* Estilo para el timeline de novedades */
+        .timeline { list-style: none; padding: 0; margin-top: 1.5rem; }
+        .timeline-item { position: relative; padding: 0 0 1.5rem 2rem; border-left: 2px solid #e1e1e1; }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -9px;
+            top: 5px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            border: 2px solid white;
+        }
+        .timeline-date { font-weight: bold; font-size: 0.9em; color: var(--muted-color); }
+        .timeline-text { margin-top: 0.25rem; }
+        
+        /* Estilo para el botón de login mientras carga */
+        #login-form button[aria-busy="true"] {
+            color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <main id="login-view" class="container">
+        <article>
+            <h2 align="center">Estudio Jurídico Onassis & Baronetto</h2>
+            <h3 align="center">Acceso a Clientes</h3>
+            <form id="login-form">
+                <label for="dni">DNI (Usuario)</label>
+                <input type="text" id="dni" name="dni" placeholder="Tu número de DNI" required>
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" name="password" placeholder="Tu contraseña" required>
+                <button type="submit" id="login-button">Ingresar</button>
+            </form>
+            <p id="login-error" style="color: red;" class="hidden"></p>
+        </article>
+    </main>
+
+    <div id="app-view" class="container hidden">
+        <header>
+            <button class="secondary outline logout-btn">Cerrar Sesión</button>
+            <h3 id="welcome-message"></h3>
+        </header>
+
+        <hr>
+
+        <nav>
+            <ul>
+                <li><a href="#" class="tab-link active" data-target="causas-view">Mis Causas</a></li>
+                <li><a href="#" class="tab-link" data-target="perfil-view">Mi Perfil</a></li>
+            </ul>
+        </nav>
+
+        <div id="causas-view" class="tab-content">
+            <div id="causas-list-view">
+                <h4>Resumen de Expedientes</h4>
+                <div id="causas-list"></div>
+            </div>
+            <div id="causa-detail-view" class="hidden">
+                <button id="back-to-list-btn">&larr; Volver a mis causas</button>
+                <h4 id="causa-caratula"></h4>
+                <p><strong>Juzgado:</strong> <span id="causa-juzgado"></span> | <strong>Estado:</strong> <span id="causa-estado"></span></p>
+                <h5>Novedades</h5>
+                <ul id="novedades-timeline" class="timeline"></ul>
+            </div>
+        </div>
+        
+        <div id="perfil-view" class="tab-content hidden">
+            <h4>Mi Perfil</h4>
+            <article>
+                <p><strong>DNI:</strong> <span id="profile-dni"></span></p>
+                <p><strong>Email:</strong> <span id="profile-email"></span></p>
+                <p><strong>Celular:</strong> <span id="profile-cel"></span></p>
+                <details>
+                    <summary>Actualizar mis datos / Cambiar contraseña</summary>
+                    <p><strong>Importante:</strong> Para actualizar tu email, celular o cambiar tu contraseña, por favor comunícate directamente con el estudio. Por seguridad, estos cambios se realizan de forma manual para proteger tu información.</p>
+                </details>
+            </article>
+        </div>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------------------
+        // LINK DE LA BASE DE DATOS (YA CONFIGURADO)
+        // -------------------------------------------------------------------------
+        const SPREADSHEET_URL_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5MZPinQOp3q4nvb2U_R4YGeTZddVa3kr5DSknyky5dOAUJ7ttX1JiJX1RrlFvHgqzJ9pyhRLq1Q_K/pub";
+        // -------------------------------------------------------------------------
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Referencias al DOM
+            const loginView = document.getElementById('login-view');
+            const appView = document.getElementById('app-view');
+            const loginForm = document.getElementById('login-form');
+            const loginButton = document.getElementById('login-button');
+            const loginError = document.getElementById('login-error');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const causasListView = document.getElementById('causas-list-view');
+            const causasListContainer = document.getElementById('causas-list');
+            const causaDetailView = document.getElementById('causa-detail-view');
+            
+            // Función para parsear CSV a un array de objetos
+            function parseCSV(text) {
+                if (!text) return [];
+                const lines = text.trim().split(/\r?\n/);
+                const headers = lines[0].split(',').map(h => h.trim());
+                return lines.slice(1).map(line => {
+                    const values = line.split(',');
+                    return headers.reduce((obj, header, index) => {
+                        obj[header] = values[index] ? values[index].trim() : '';
+                        return obj;
+                    }, {});
+                });
+            }
+
+            // Función para obtener los datos de la hoja de cálculo
+            async function fetchData() {
+                loginButton.setAttribute('aria-busy', 'true');
+                loginButton.textContent = 'Ingresando...';
+                try {
+                    // Se agrega un parámetro único a la URL para evitar problemas de caché del navegador
+                    const cacheBuster = `&v=${new Date().getTime()}`;
+                    const urls = ['Clientes', 'Causas', 'Novedades'].map(sheet => 
+                        `${SPREADSHEET_URL_BASE}?sheet=${sheet}&output=csv${cacheBuster}`
+                    );
+                    
+                    const [clientesRes, causasRes, novedadesRes] = await Promise.all(urls.map(url => fetch(url)));
+                    
+                    if (!clientesRes.ok || !causasRes.ok || !novedadesRes.ok) {
+                       throw new Error("No se pudo cargar una o más hojas de datos. Verifica que el link base sea correcto y que las hojas se llamen 'Clientes', 'Causas' y 'Novedades'.");
+                    }
+
+                    const [clientesText, causasText, novedadesText] = await Promise.all([
+                        clientesRes.text(), causasRes.text(), novedadesRes.text()
+                    ]);
+                    
+                    return {
+                        clientes: parseCSV(clientesText),
+                        causas: parseCSV(causasText),
+                        novedades: parseCSV(novedadesText)
+                    };
+                } catch (error) {
+                    console.error("Error al cargar los datos:", error);
+                    loginError.textContent = 'Error de conexión. Revisa el link de la base de datos o tu conexión a internet.';
+                    loginError.classList.remove('hidden');
+                    return null;
+                } finally {
+                    loginButton.removeAttribute('aria-busy');
+                    loginButton.textContent = 'Ingresar';
+                }
+            }
+
+            // Lógica de Login
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const dni = document.getElementById('dni').value;
+                const password = document.getElementById('password').value;
+                loginError.classList.add('hidden');
+
+                if (!SPREADSHEET_URL_BASE.startsWith('http')) {
+                    loginError.textContent = 'Error: No has configurado el link de la base de datos en el archivo HTML.';
+                    loginError.classList.remove('hidden');
+                    return;
+                }
+
+                const data = await fetchData();
+                if (!data) return;
+                
+                const cliente = data.clientes.find(c => c.DNI === dni && c.contraseña === password);
+
+                if (cliente) {
+                    sessionStorage.setItem('cliente', JSON.stringify(cliente));
+                    sessionStorage.setItem('appData', JSON.stringify(data));
+                    showAppView(cliente, data);
+                } else {
+                    loginError.textContent = 'DNI o contraseña incorrectos.';
+                    loginError.classList.remove('hidden');
+                }
+            });
+
+            // Función para mostrar la vista principal de la App
+            function showAppView(cliente, data) {
+                loginView.classList.add('hidden');
+                appView.classList.remove('hidden');
+                
+                // Perfil
+                welcomeMessage.textContent = `Bienvenido/a, ${cliente.nombre}`;
+                document.getElementById('profile-dni').textContent = cliente.DNI;
+                document.getElementById('profile-email').textContent = cliente.mail || 'No especificado';
+                document.getElementById('profile-cel').textContent = cliente.celular || 'No especificado';
+
+                // Causas
+                renderCausasList(cliente.DNI, data.causas, data.novedades);
+                showTab('causas-view'); // Mostrar la pestaña de causas por defecto
+            }
+
+            // Renderizar la lista de causas del cliente
+            function renderCausasList(dni, todasLasCausas, todasLasNovedades) {
+                causasListContainer.innerHTML = '';
+                const misCausas = todasLasCausas.filter(c => c.DNI === dni);
+
+                if (misCausas.length === 0) {
+                    causasListContainer.innerHTML = '<article><p>Actualmente no tienes causas registradas para mostrar.</p></article>';
+                    return;
+                }
+
+                misCausas.forEach(causa => {
+                    const causaDiv = document.createElement('article');
+                    causaDiv.className = 'causa-card';
+                    causaDiv.innerHTML = `<strong>${causa.carátula}</strong><br><small>Juzgado: ${causa.juzgado}</small>`;
+                    causaDiv.addEventListener('click', () => showCausaDetail(causa, todasLasNovedades));
+                    causasListContainer.appendChild(causaDiv);
+                });
+            }
+
+            // Mostrar el detalle completo de una causa
+            function showCausaDetail(causa, todasLasNovedades) {
+                causasListView.classList.add('hidden');
+                causaDetailView.classList.remove('hidden');
+
+                document.getElementById('causa-caratula').textContent = causa.carátula;
+                document.getElementById('causa-juzgado').textContent = causa.juzgado;
+                document.getElementById('causa-estado').textContent = causa.estado;
+
+                const timeline = document.getElementById('novedades-timeline');
+                timeline.innerHTML = '';
+                const novedadesDeCausa = todasLasNovedades
+                    .filter(n => n.ID_causa === causa.ID)
+                    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha)); // Ordenar de más reciente a más antigua
+
+                if (novedadesDeCausa.length === 0) {
+                    timeline.innerHTML = '<li><p>No hay novedades registradas para esta causa.</p></li>';
+                    return;
+                }
+
+                novedadesDeCausa.forEach(novedad => {
+                    const item = document.createElement('li');
+                    item.className = 'timeline-item';
+                    const fechaFormateada = new Date(novedad.fecha + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
+                    let linkHTML = '';
+                    if (novedad.link_documento && novedad.link_documento.startsWith('http')) {
+                        linkHTML = `<p><a href="${novedad.link_documento}" target="_blank" rel="noopener noreferrer">Ver documento adjunto</a></p>`;
+                    }
+                    item.innerHTML = `
+                        <p class="timeline-date">${fechaFormateada}</p>
+                        <p class="timeline-text">${novedad.texto}</p>
+                        ${linkHTML}
+                    `;
+                    timeline.appendChild(item);
+                });
+            }
+            
+            // Lógica de las pestañas
+            const tabLinks = document.querySelectorAll('.tab-link');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            function showTab(targetId) {
+                tabContents.forEach(content => {
+                    content.classList.toggle('hidden', content.id !== targetId);
+                });
+                tabLinks.forEach(link => {
+                    link.classList.toggle('active', link.dataset.target === targetId);
+                });
+                 // Al cambiar de pestaña, asegurarse de que se vea la lista y no un detalle
+                if (targetId === 'causas-view') {
+                    causaDetailView.classList.add('hidden');
+                    causasListView.classList.remove('hidden');
+                }
+            }
+
+            tabLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    showTab(link.dataset.target);
+                });
+            });
+
+            // Botón para volver a la lista
+            document.getElementById('back-to-list-btn').addEventListener('click', () => {
+                causaDetailView.classList.add('hidden');
+                causasListView.classList.remove('hidden');
+            });
+
+            // Logout
+            document.querySelector('.logout-btn').addEventListener('click', () => {
+                sessionStorage.clear();
+                location.reload();
+            });
+
+            // Chequear si ya hay una sesión activa al cargar la página
+            const cliente = JSON.parse(sessionStorage.getItem('cliente'));
+            const data = JSON.parse(sessionStorage.getItem('appData'));
+            if (cliente && data) {
+                showAppView(cliente, data);
+            }
+        });
+    </script>
+</body>
+</html>
