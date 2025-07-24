@@ -76,7 +76,10 @@
     </div>
 
     <script>
-        const SPREADSHEET_URL_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5MZPinQOp3q4nvb2U_R4YGeTZddVa3kr5DSknyky5dOAUJ7ttX1JiJX1RrlFvHgqzJ9pyhRLq1Q_K/pub";
+        // --- URLs DIRECTAS Y CORRECTAS PARA CADA HOJA ---
+        const CLIENTES_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5MZPinQOp3q4nvb2U_R4YGeTZddVa3kr5DSknyky5dOAUJ7ttX1JiJX1RrlFvHgqzJ9pyhRLq1Q_K/pub?output=csv";
+        const CAUSAS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5MZPinQOp3q4nvb2U_R4YGeTZddVa3kr5DSknyky5dOAUJ7ttX1JiJX1RrlFvHgqzJ9pyhRLq1Q_K/pub?gid=305599245&single=true&output=csv";
+        const NOVEDADES_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5MZPinQOp3q4nvb2U_R4YGeTZddVa3kr5DSknyky5dOAUJ7ttX1JiJX1RrlFvHgqzJ9pyhRLq1Q_K/pub?gid=426082673&single=true&output=csv";
 
         document.addEventListener('DOMContentLoaded', () => {
             const loginView = document.getElementById('login-view');
@@ -89,7 +92,6 @@
             const causasListContainer = document.getElementById('causas-list');
             const causaDetailView = document.getElementById('causa-detail-view');
 
-            // --- VERSIÓN FINAL DEL LECTOR DE DATOS ---
             function parseCSV(text) {
                 if (!text) return [];
                 const lines = text.trim().split(/\r?\n/);
@@ -104,7 +106,7 @@
                     let inQuotes = false;
 
                     for (let char of line) {
-                        if (char === '"') {
+                        if (char === '"' && line.indexOf(char) > 0) { // Maneja comillas
                             inQuotes = !inQuotes;
                         } else if (char === ',' && !inQuotes) {
                             values.push(current);
@@ -127,11 +129,12 @@
                 loginButton.textContent = 'Ingresando...';
                 try {
                     const cacheBuster = `&v=${new Date().getTime()}`;
-                    const urls = ['Clientes', 'Causas', 'Novedades'].map(sheet => `${SPREADSHEET_URL_BASE}?sheet=${sheet}&output=csv${cacheBuster}`);
+                    const urls = [CLIENTES_URL, CAUSAS_URL, NOVEDADES_URL].map(url => `${url}${cacheBuster}`);
+
                     const [clientesRes, causasRes, novedadesRes] = await Promise.all(urls.map(url => fetch(url)));
 
                     if (!clientesRes.ok || !causasRes.ok || !novedadesRes.ok) {
-                       throw new Error("No se pudo cargar los datos. Revisa la URL y los nombres de las hojas.");
+                       throw new Error("No se pudo cargar los datos. Revisa los links de publicación de las hojas.");
                     }
 
                     const [clientesText, causasText, novedadesText] = await Promise.all([clientesRes.text(), causasRes.text(), novedadesRes.text()]);
@@ -143,7 +146,7 @@
                     };
                 } catch (error) {
                     console.error("Error al cargar los datos:", error);
-                    loginError.textContent = 'Error de conexión. Revisa el link o tu conexión.';
+                    loginError.textContent = 'Error de conexión. Revisa los links o tu conexión a internet.';
                     loginError.classList.remove('hidden');
                     return null;
                 } finally {
@@ -186,7 +189,7 @@
                 causasListContainer.innerHTML = '';
                 const misCausas = todasLasCausas.filter(c => c.DNI === dni);
                 if (misCausas.length === 0) {
-                    causasListContainer.innerHTML = '<article><p>No tienes causas registradas.</p></article>';
+                    causasListContainer.innerHTML = '<article><p>No tienes causas registradas para mostrar.</p></article>';
                     return;
                 }
                 misCausas.forEach(causa => {
@@ -208,7 +211,7 @@
                 timeline.innerHTML = '';
                 const novedadesDeCausa = todasLasNovedades.filter(n => n.ID_causa === causa.ID);
                 if (novedadesDeCausa.length === 0) {
-                    timeline.innerHTML = '<li><p>No hay novedades registradas.</p></li>';
+                    timeline.innerHTML = '<li><p>No hay novedades registradas para esta causa.</p></li>';
                     return;
                 }
                 novedadesDeCausa.forEach(novedad => {
